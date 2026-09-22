@@ -28,11 +28,9 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      # 1. بناء ملف الـ JAR مع المكتبات عبر Maven Wrapper
-      - name: 📦 Build Fat JAR with Maven Wrapper
-        run: |
-          chmod +x mvnw
-          ./mvnw clean package
+      # 1. بناء ملف الـ JAR عبر Maven المدمج في السيرفر مباشرة
+      - name: 📦 Build Fat JAR with Maven
+        run: mvn clean package
 
       # 2. إنشاء تطبيق الماك المستقل عبر jpackage
       - name: 🍏 Package Native Mac App with jpackage
