@@ -2,25 +2,19 @@ package com.maknoon.model;
 
 public class AppNetUsage {
     private final String name;
-    private final int pid;
     private long rxSpeed;
-    private long txSpeed;
-    private long todayTotalBytes; // إجمالي استهلاك التطبيق لليوم
+    private long todayTotalBytes;
 
-    public AppNetUsage(String name, int pid) {
+    public AppNetUsage(String name) {
         this.name = name;
-        this.pid = pid;
     }
 
-    public void update(long rxSpeed, long txSpeed, long deltaBytes) {
+    public void update(long rxSpeed, long deltaBytes) {
         this.rxSpeed = rxSpeed;
-        this.txSpeed = txSpeed;
         this.todayTotalBytes += deltaBytes;
     }
 
     public String getName() { return name; }
-    public int getPid() { return pid; }
     public long getRxSpeed() { return rxSpeed; }
-    public long getTxSpeed() { return txSpeed; }
     public long getTodayTotalBytes() { return todayTotalBytes; }
 }

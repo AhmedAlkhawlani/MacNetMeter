@@ -163,7 +163,7 @@ public class App {
                 }
         ));
     }
-
+    @SuppressWarnings("SameParameterValue")
     private static void notifyUser(String title, String message) {
         new Thread(() -> {
             try {

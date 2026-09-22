@@ -65,7 +65,11 @@ public class MenuBuilder {
         macDetails.setEnabled(false);
         menu.add(macDetails);
         menu.addSeparator();
-
+// ⏱ إعادة مدة تشغيل الجهاز للقائمة (Mac Uptime)
+        MenuItem uptimeItem = new MenuItem("⏱ Mac Uptime: " + sysInfo.getFormattedUptime());
+        uptimeItem.setEnabled(false);
+        menu.add(uptimeItem);
+        menu.addSeparator();
         // 3. التحكم بالمراقبة والمعالج
         CheckboxMenuItem monitorToggle = new CheckboxMenuItem("🟢 Monitoring Active", isMonitoringActive);
         monitorToggle.addItemListener(e -> onToggleMonitoring.accept(!isMonitoringActive));

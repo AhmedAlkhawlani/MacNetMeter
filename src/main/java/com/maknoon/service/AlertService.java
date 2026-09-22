@@ -18,8 +18,7 @@ public class AlertService {
 
     public void checkUsage(long todayBytes) {
         if (alertLimitBytes > 0 && todayBytes >= alertLimitBytes && !alertedToday) {
-            sendMacAlertBox("⚠️ تنبيه تجاوز باقة البيانات!",
-                    "لقد تجاوز استهلاكك لليوم الحد المحدد (" + formatData(alertLimitBytes) + ")!\\nإجمالي الاستهلاك الحالي: " + formatData(todayBytes));
+            sendMacAlertBox("لقد تجاوز استهلاكك لليوم الحد المحدد (" + formatData(alertLimitBytes) + ")!\\nإجمالي الاستهلاك الحالي: " + formatData(todayBytes));
             alertedToday = true;
         }
     }
@@ -58,11 +57,11 @@ public class AlertService {
         }).start();
     }
 
-    // تم إصلاح الخطأ: الآن الزر الافتراضي يطابق زر "حسناً" بدقة مع صوت Sosumi
-    private void sendMacAlertBox(String title, String message) {
+    // إزالة parameter title غير الضروري
+    private void sendMacAlertBox(String message) {
         new Thread(() -> {
             try {
-                String script = String.format("display alert \"%s\" message \"%s\" as critical buttons {\"حسناً\"} default button \"حسناً\"", title, message);
+                String script = String.format("display alert \"⚠️ تنبيه تجاوز باقة البيانات!\" message \"%s\" as critical buttons {\"حسناً\"} default button \"حسناً\"", message);
                 new ProcessBuilder("osascript", "-e", script).start();
                 new ProcessBuilder("afplay", "/System/Library/Sounds/Sosumi.aiff").start();
             } catch (Exception ignored) {}
