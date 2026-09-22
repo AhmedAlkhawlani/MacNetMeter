@@ -1,0 +1,75 @@
+name: 🍏 Build & Release MacNetMeter (Apple Silicon)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*' # ينشئ Release رسمي تلقائياً عند إضافة Tag جديد مثل v1.0.0
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # يتيح لك تشغيله يدوياً بضغطة زر من الموقع
+
+permissions:
+  contents: write # إعطاء الصلاحية لرفع ملف التطبيق إلى Releases
+
+jobs:
+  build-apple-silicon:
+    name: Build Native Mac App (M1/M2)
+    runs-on: macos-14 # سيرفرات Apple Silicon الرسمية من GitHub
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      # 1. بناء ملف الـ JAR مع المكتبات عبر Maven Wrapper
+      - name: 📦 Build Fat JAR with Maven Wrapper
+        run: |
+          chmod +x mvnw
+          ./mvnw clean package
+
+      # 2. إنشاء تطبيق الماك المستقل عبر jpackage
+      - name: 🍏 Package Native Mac App with jpackage
+        run: |
+          jpackage \
+            --type app-image \
+            --input target \
+            --name MacNetMeter \
+            --main-jar MacNetMeter-1.0.0-jar-with-dependencies.jar \
+            --main-class com.maknoon.App \
+            --dest dist \
+            --java-options "-Dapple.awt.UIElement=true"
+
+      # 3. ضغط تطبيق MacNetMeter.app في ملف ZIP
+      - name: 🗜️ Compress MacNetMeter.app to ZIP
+        run: |
+          cd dist
+          zip -r ../MacNetMeter-macOS-AppleSilicon.zip MacNetMeter.app
+
+      # 4. رفع الملف كـ Artifact (تحميل مباشر للمطورين)
+      - name: 🚀 Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacNetMeter-AppleSilicon-App
+          path: MacNetMeter-macOS-AppleSilicon.zip
+          retention-days: 14
+
+      # 5. نشر التطبيق في صفحة GitHub Releases العامة
+      - name: 📢 Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          files: MacNetMeter-macOS-AppleSilicon.zip
+          tag_name: ${{ github.ref_name || 'v1.0.0' }}
+          name: "Release ${{ github.ref_name || 'v1.0.0' }} (Apple Silicon)"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
