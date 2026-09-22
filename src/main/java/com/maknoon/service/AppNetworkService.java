@@ -15,21 +15,23 @@ public class AppNetworkService {
     private final Map<String, AppNetUsage> appsMap = new ConcurrentHashMap<>();
     private final Map<String, Long> lastRxMap = new HashMap<>();
     private final Map<String, Long> lastTxMap = new HashMap<>();
+    private final DataSaverService dataSaver;
 
-    public AppNetworkService() {
-        // تشغيل فاحص الشبكة في الخلفية كل ثانيتين
+    public AppNetworkService(DataSaverService dataSaver) {
+        this.dataSaver = dataSaver;
+
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "AppNetScanner");
             t.setDaemon(true);
             return t;
         });
 
-        executor.scheduleAtFixedRate(this::pollNetworkApps, 1, 2, TimeUnit.SECONDS);
+        // تشغيل فوري (0 delay) ثم كل ثانيتين لمنع أي تأخير في القائمة!
+        executor.scheduleAtFixedRate(this::pollNetworkApps, 0, 2, TimeUnit.SECONDS);
     }
 
     private void pollNetworkApps() {
         try {
-            // استخدام أداة أبل nettop لجلب استهلاك كل تطبيق (Logging mode)
             ProcessBuilder pb = new ProcessBuilder("nettop", "-P", "-L", "1", "-J", "bytes_in,bytes_out");
             Process process = pb.start();
 
@@ -38,35 +40,35 @@ public class AppNetworkService {
                 boolean isHeader = true;
 
                 while ((line = reader.readLine()) != null) {
-                    if (isHeader) { // تخطي سطر العناوين
-                        isHeader = false;
-                        continue;
-                    }
+                    if (isHeader) { isHeader = false; continue; }
 
                     String[] tokens = line.split(",");
                     if (tokens.length >= 3) {
-                        String procEntry = tokens[0].trim(); // مثل Google Chrome.1234
+                        String procEntry = tokens[0].trim();
                         long bytesIn = parseLong(tokens[1].trim());
                         long bytesOut = parseLong(tokens[2].trim());
 
-                        // استخراج اسم التطبيق والـ PID
                         int lastDot = procEntry.lastIndexOf('.');
                         if (lastDot > 0) {
                             String appName = procEntry.substring(0, lastDot);
                             int pid = parseInt(procEntry.substring(lastDot + 1));
 
-                            // حساب الفارق اللحظي (السرعة الحالية)
                             long prevIn = lastRxMap.getOrDefault(procEntry, bytesIn);
                             long prevOut = lastTxMap.getOrDefault(procEntry, bytesOut);
 
-                            long rxSpeed = (bytesIn - prevIn) / 2; // مقسوم على الفارق الزمني (2 ثانية)
-                            long txSpeed = (bytesOut - prevOut) / 2;
+                            long deltaIn = Math.max(0, bytesIn - prevIn);
+                            long deltaOut = Math.max(0, bytesOut - prevOut);
 
                             lastRxMap.put(procEntry, bytesIn);
                             lastTxMap.put(procEntry, bytesOut);
 
                             AppNetUsage usage = appsMap.computeIfAbsent(appName, k -> new AppNetUsage(appName, pid));
-                            usage.updateSpeeds(Math.max(0, rxSpeed), Math.max(0, txSpeed));
+                            usage.update(deltaIn / 2, deltaOut / 2, deltaIn + deltaOut);
+
+                            // فحص وضع التوفير
+//                            dataSaver.inspectTraffic(appName, deltaIn / 2);
+                            // ابحث عن هذا السطر في AppNetworkService.java وغيّره إلى:
+                            dataSaver.inspectAndEnforce(appName, pid, deltaIn / 2);
                         }
                     }
                 }
@@ -74,13 +76,18 @@ public class AppNetworkService {
         } catch (Exception ignored) {}
     }
 
-    // جلب أكثر التطبيقات سحباً للإنترنت حالياً (مرتبة تنازلياً)
+    // جلب أكثر التطبيقات استهلاكاً (سواء الحالية أو التراكمية لليوم)
     public List<AppNetUsage> getTopActiveApps(int limit) {
         return appsMap.values().stream()
-                .filter(a -> (a.getRxSpeed() + a.getTxSpeed()) > 0 || a.getTotalBytes() > 1024 * 1024)
-                .sorted((a1, a2) -> Long.compare((a2.getRxSpeed() + a2.getTxSpeed()), (a1.getRxSpeed() + a1.getTxSpeed())))
+                .filter(a -> a.getTodayTotalBytes() > 100 * 1024 || a.getRxSpeed() > 0)
+                .sorted((a1, a2) -> Long.compare(a2.getTodayTotalBytes(), a1.getTodayTotalBytes()))
                 .limit(limit)
                 .collect(Collectors.toList());
+    }
+
+    // إيقاف تطبيق فوراً لحماية النت
+    public boolean stopApp(int pid) {
+        return ProcessHandle.of(pid).map(ProcessHandle::destroyForcibly).orElse(false);
     }
 
     private long parseLong(String s) {
