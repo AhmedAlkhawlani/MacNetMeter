@@ -11,6 +11,7 @@ import oshi.hardware.HardwareAbstractionLayer;
 import oshi.hardware.NetworkIF;
 
 import java.awt.*;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Timer;
@@ -19,23 +20,28 @@ import java.util.prefs.Preferences;
 
 public class App {
     private static final Preferences prefs = Preferences.userNodeForPackage(App.class);
-    private static DisplayMode currentMode = DisplayMode.SPEEDS_ONLY;
+
+    // استرجاع الإعدادات المحفوظة للأبد
+    private static DisplayMode currentMode;
+    private static boolean isMonitoringActive;
+    private static boolean isCpuWidgetVisible;
     private static long todayBytes = 0;
     private static String savedDate = "";
     private static long previousRx = 0, previousTx = 0;
+    private static long currentRxSpeed = 0, currentTxSpeed = 0;
 
     public static void main(String[] args) throws Exception {
         System.setProperty("apple.awt.UIElement", "true");
         if (!SystemTray.isSupported()) return;
 
-        loadTodayData();
+        // تحميل الإعدادات السابقة
+        loadAllPreferences();
 
         SystemInfo si = new SystemInfo();
         HardwareAbstractionLayer hal = si.getHardware();
 
-        // 1. تشغيل الخدمات
         CaffeinateService caffeinateService = new CaffeinateService();
-        DataSaverService dataSaverService = new DataSaverService(); // خدمة توفير الباقة 🛡️
+        DataSaverService dataSaverService = new DataSaverService();
         AlertService alertService = new AlertService();
         SystemInfoService sysInfoService = new SystemInfoService(si);
         CpuMemoryService cpuMemoryService = new CpuMemoryService(si);
@@ -43,23 +49,20 @@ public class App {
 
         SystemTray tray = SystemTray.getSystemTray();
 
-        TrayIcon netWidget = new TrayIcon(WidgetRenderer.render(currentMode, "0 B", "0 B", todayBytes, alertService.getAlertLimitBytes(), false, false, 0, 0));
+        TrayIcon netWidget = new TrayIcon(WidgetRenderer.render(currentMode, "0 B", "0 B", todayBytes, alertService.getAlertLimitBytes(), false, false, !isMonitoringActive, 0, 0));
         netWidget.setImageAutoSize(false);
 
         TrayIcon cpuWidget = new TrayIcon(CpuWidgetRenderer.render(0, cpuMemoryService.getUsedMemory(), cpuMemoryService.getTotalMemory()));
         cpuWidget.setImageAutoSize(false);
 
-        Runnable resetTodayAction = () -> {
-            todayBytes = 0;
-            saveTodayData();
-            alertService.resetAlert();
-            refreshNet(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, null);
-        };
-
-        refreshNet(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, resetTodayAction);
-
         tray.add(netWidget);
-        tray.add(cpuWidget);
+        if (isCpuWidgetVisible) {
+            tray.add(cpuWidget);
+        }
+
+        // تحديث واجهة القائمة
+        Runnable refreshMenuAction = () -> updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, tray, cpuWidget);
+        refreshMenuAction.run();
 
         Timer timer = new Timer();
         timer.scheduleAtFixedRate(new TimerTask() {
@@ -67,62 +70,109 @@ public class App {
             public void run() {
                 checkMidnightReset(alertService);
 
-                // --- تحديث الشبكة ---
-                List<NetworkIF> nets = hal.getNetworkIFs();
-                long curRx = 0, curTx = 0;
-                for (NetworkIF net : nets) {
-                    net.updateAttributes();
-                    curRx += net.getBytesRecv();
-                    curTx += net.getBytesSent();
-                }
+                if (isMonitoringActive) {
+                    List<NetworkIF> nets = hal.getNetworkIFs();
+                    long curRx = 0, curTx = 0;
+                    for (NetworkIF net : nets) {
+                        net.updateAttributes();
+                        curRx += net.getBytesRecv();
+                        curTx += net.getBytesSent();
+                    }
 
-                if (previousRx > 0 && previousTx > 0) {
-                    long rxSpeed = curRx - previousRx;
-                    long txSpeed = curTx - previousTx;
-                    todayBytes += (rxSpeed + txSpeed);
-                    saveTodayData();
+                    if (previousRx > 0 && previousTx > 0) {
+                        currentRxSpeed = curRx - previousRx;
+                        currentTxSpeed = curTx - previousTx;
+                        todayBytes += (currentRxSpeed + currentTxSpeed);
+                        saveTodayData();
 
-                    alertService.checkUsage(todayBytes);
+                        alertService.checkUsage(todayBytes);
 
+                        netWidget.setImage(WidgetRenderer.render(
+                                currentMode,
+                                formatSpeed(currentRxSpeed),
+                                formatSpeed(currentTxSpeed),
+                                todayBytes,
+                                alertService.getAlertLimitBytes(),
+                                caffeinateService.isCaffeinated(),
+                                dataSaverService.isEnabled(),
+                                false,
+                                currentRxSpeed,
+                                currentTxSpeed
+                        ));
+                    }
+                    previousRx = curRx;
+                    previousTx = curTx;
+                } else {
+                    // وضع الخمول والتعطيل
                     netWidget.setImage(WidgetRenderer.render(
-                            currentMode,
-                            formatSpeed(rxSpeed),
-                            formatSpeed(txSpeed),
-                            todayBytes,
+                            currentMode, "0 B", "0 B", todayBytes,
                             alertService.getAlertLimitBytes(),
                             caffeinateService.isCaffeinated(),
                             dataSaverService.isEnabled(),
-                            rxSpeed,
-                            txSpeed
+                            true, 0, 0
                     ));
                 }
-                previousRx = curRx;
-                previousTx = curTx;
 
-                // تحديث قائمة الشبكة
-                refreshNet(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, resetTodayAction);
+                // تحديث المعالج والرام إذا كان مفعلاً وظاهراً فقط
+                if (isCpuWidgetVisible && isMonitoringActive) {
+                    double cpu = cpuMemoryService.getCpuUsage();
+                    long usedMem = cpuMemoryService.getUsedMemory();
+                    long totalMem = cpuMemoryService.getTotalMemory();
 
-                // --- تحديث المعالج والرام ---
-                double cpu = cpuMemoryService.getCpuUsage();
-                long usedMem = cpuMemoryService.getUsedMemory();
-                long totalMem = cpuMemoryService.getTotalMemory();
+                    cpuWidget.setImage(CpuWidgetRenderer.render(cpu, usedMem, totalMem));
+                    cpuWidget.setPopupMenu(CpuMenuBuilder.build(cpuMemoryService));
+                }
 
-                cpuWidget.setImage(CpuWidgetRenderer.render(cpu, usedMem, totalMem));
-                cpuWidget.setPopupMenu(CpuMenuBuilder.build(cpuMemoryService));
+                // تحديث القائمة دورياً
+                updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, tray, cpuWidget);
             }
         }, 0, 1000);
     }
 
-    private static void refreshNet(TrayIcon widget, CaffeinateService caffeinate, AlertService alerts,
-                                   SystemInfoService sysInfo, AppNetworkService appNet, DataSaverService dataSaver, Runnable onResetToday) {
-        widget.setPopupMenu(MenuBuilder.build(caffeinate, alerts, sysInfo, appNet, dataSaver, currentMode,
-                () -> refreshNet(widget, caffeinate, alerts, sysInfo, appNet, dataSaver, onResetToday),
-                onResetToday,
-                m -> {
-                    currentMode = m;
-                    refreshNet(widget, caffeinate, alerts, sysInfo, appNet, dataSaver, onResetToday);
+    private static void updateMenu(TrayIcon netWidget, CaffeinateService caffeinate, AlertService alerts,
+                                   SystemInfoService sysInfo, AppNetworkService appNet, DataSaverService dataSaver,
+                                   SystemTray tray, TrayIcon cpuWidget) {
+        netWidget.setPopupMenu(MenuBuilder.build(
+                caffeinate, alerts, sysInfo, appNet, dataSaver, currentMode,
+                isMonitoringActive, isCpuWidgetVisible, todayBytes, currentRxSpeed, currentTxSpeed,
+                () -> updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget),
+                () -> {
+                    todayBytes = 0;
+                    saveTodayData();
+                    alerts.resetAlert();
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                },
+                newMonitoringState -> {
+                    isMonitoringActive = newMonitoringState;
+                    prefs.putBoolean("monitoring_active", isMonitoringActive);
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                },
+                newCpuVisibleState -> {
+                    isCpuWidgetVisible = newCpuVisibleState;
+                    prefs.putBoolean("cpu_widget_visible", isCpuWidgetVisible);
+                    if (isCpuWidgetVisible) {
+                        try { tray.add(cpuWidget); } catch (Exception ignored) {}
+                    } else {
+                        tray.remove(cpuWidget);
+                        notifyUser("تم تعطيل مراقب المعالج", "تم إخفاء وتعطيل مراقب المعالج والرام لتوفير المساحة وموارد الجهاز.");
+                    }
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                },
+                newMode -> {
+                    currentMode = newMode;
+                    prefs.put("display_mode", currentMode.name());
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
                 }
         ));
+    }
+
+    private static void notifyUser(String title, String message) {
+        new Thread(() -> {
+            try {
+                String script = String.format("display notification \"%s\" with title \"%s\" sound name \"Pop\"", message, title);
+                new ProcessBuilder("osascript", "-e", script).start();
+            } catch (IOException ignored) {}
+        }).start();
     }
 
     private static String formatSpeed(long bytes) {
@@ -131,11 +181,14 @@ public class App {
         return String.format("%.1f %c", bytes / Math.pow(1024, exp), "KMGTPE".charAt(exp - 1));
     }
 
-    private static void loadTodayData() {
+    private static void loadAllPreferences() {
         savedDate = prefs.get("date", LocalDate.now().toString());
         if (savedDate.equals(LocalDate.now().toString())) {
             todayBytes = prefs.getLong("bytes", 0);
         }
+        currentMode = DisplayMode.valueOf(prefs.get("display_mode", DisplayMode.FULL.name()));
+        isMonitoringActive = prefs.getBoolean("monitoring_active", true);
+        isCpuWidgetVisible = prefs.getBoolean("cpu_widget_visible", true);
     }
 
     private static void saveTodayData() {

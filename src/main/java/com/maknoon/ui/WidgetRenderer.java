@@ -12,13 +12,13 @@ public class WidgetRenderer {
 
     public static Image render(DisplayMode mode, String down, String up, long todayBytes,
                                long targetLimitBytes, boolean isCaffeinated, boolean isDataSaver,
-                               long rxSpeed, long txSpeed) {
+                               boolean isPaused, long rxSpeed, long txSpeed) {
 
-        String downText = "↓ " + down;
-        String upText = "↑ " + up;
+        String downText = isPaused ? "↓ 0 B" : "↓ " + down;
+        String upText = isPaused ? "↑ 0 B" : "↑ " + up;
         String sepText = "│";
-        String usageText = formatData(todayBytes);
-        String limitText = (targetLimitBytes > 0) ? " / " + formatData(targetLimitBytes) : "";
+        String usageText = isPaused ? "⏸ Paused" : formatData(todayBytes);
+        String limitText = (!isPaused && targetLimitBytes > 0) ? " / " + formatData(targetLimitBytes) : "";
 
         BufferedImage dummy = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D gDummy = dummy.createGraphics();
@@ -46,11 +46,11 @@ public class WidgetRenderer {
         int height = 22;
 
         BufferedImage img1x = drawCanvas(totalWidth, height, 1, mode, downText, upText, sepText,
-                usageText, limitText, isCaffeinated, isDataSaver, rxSpeed, txSpeed,
-                todayBytes, targetLimitBytes, spacing);
+                usageText, limitText, isCaffeinated, isDataSaver, isPaused,
+                rxSpeed, txSpeed, todayBytes, targetLimitBytes, spacing);
         BufferedImage img3x = drawCanvas(totalWidth, height, 3, mode, downText, upText, sepText,
-                usageText, limitText, isCaffeinated, isDataSaver, rxSpeed, txSpeed,
-                todayBytes, targetLimitBytes, spacing);
+                usageText, limitText, isCaffeinated, isDataSaver, isPaused,
+                rxSpeed, txSpeed, todayBytes, targetLimitBytes, spacing);
 
         return new BaseMultiResolutionImage(img1x, img3x);
     }
@@ -58,7 +58,7 @@ public class WidgetRenderer {
     private static BufferedImage drawCanvas(int logicalWidth, int logicalHeight, int scale,
                                             DisplayMode mode, String downText, String upText, String sepText,
                                             String usageText, String limitText,
-                                            boolean isCaffeinated, boolean isDataSaver,
+                                            boolean isCaffeinated, boolean isDataSaver, boolean isPaused,
                                             long rxSpeed, long txSpeed,
                                             long todayBytes, long targetLimitBytes, int spacing) {
 
@@ -88,38 +88,51 @@ public class WidgetRenderer {
             curX += 20;
         }
 
+        // إذا كان معطلاً، تظهر النصوص بلون رمادي باهت جداً (Dimmed)
+        Color dimColor = new Color(255, 255, 255, 60);
+
         switch (mode) {
             case FULL -> {
-                g2d.setColor(new Color(0, 245, 255));
+                g2d.setColor(isPaused ? dimColor : new Color(0, 245, 255));
                 g2d.drawString(downText, curX, y);
                 curX += fm.stringWidth(downText) + spacing;
 
-                g2d.setColor(new Color(255, 50, 150));
+                g2d.setColor(isPaused ? dimColor : new Color(255, 50, 150));
                 g2d.drawString(upText, curX, y);
                 curX += fm.stringWidth(upText) + spacing;
 
-                g2d.setColor(new Color(255, 255, 255, 60));
+                g2d.setColor(new Color(255, 255, 255, 40));
                 g2d.drawString(sepText, curX, y);
                 curX += fm.stringWidth(sepText) + spacing;
 
-                drawUsageText(g2d, curX, y, usageText, limitText, todayBytes, targetLimitBytes, fm);
+                if (isPaused) {
+                    g2d.setColor(dimColor);
+                    g2d.drawString(usageText, curX, y);
+                } else {
+                    drawUsageText(g2d, curX, y, usageText, limitText, todayBytes, targetLimitBytes, fm);
+                }
             }
             case SPEEDS_ONLY -> {
-                g2d.setColor(new Color(0, 245, 255));
+                g2d.setColor(isPaused ? dimColor : new Color(0, 245, 255));
                 g2d.drawString(downText, curX, y);
                 curX += fm.stringWidth(downText) + spacing;
 
-                g2d.setColor(new Color(255, 50, 150));
+                g2d.setColor(isPaused ? dimColor : new Color(255, 50, 150));
                 g2d.drawString(upText, curX, y);
             }
             case TODAY_ONLY -> {
-                g2d.setColor(Color.WHITE);
+                g2d.setColor(isPaused ? dimColor : Color.WHITE);
                 g2d.drawString("📊 ", curX, y);
                 curX += fm.stringWidth("📊 ");
-                drawUsageText(g2d, curX, y, usageText, limitText, todayBytes, targetLimitBytes, fm);
+                if (isPaused) {
+                    g2d.setColor(dimColor);
+                    g2d.drawString(usageText, curX, y);
+                } else {
+                    drawUsageText(g2d, curX, y, usageText, limitText, todayBytes, targetLimitBytes, fm);
+                }
             }
             case MINIMAL -> {
-                g2d.setColor(rxSpeed > 0 || txSpeed > 0 ? Color.GREEN : Color.GRAY);
+                g2d.setColor(isPaused ? dimColor : (rxSpeed > 0 || txSpeed > 0 ? Color.GREEN : Color.GRAY));
                 g2d.drawString("●", curX + 4, y);
             }
         }
