@@ -21,7 +21,6 @@ import java.util.prefs.Preferences;
 public class App {
     private static final Preferences prefs = Preferences.userNodeForPackage(App.class);
 
-    // استرجاع الإعدادات المحفوظة للأبد
     private static DisplayMode currentMode;
     private static boolean isMonitoringActive;
     private static boolean isCpuWidgetVisible;
@@ -34,7 +33,6 @@ public class App {
         System.setProperty("apple.awt.UIElement", "true");
         if (!SystemTray.isSupported()) return;
 
-        // تحميل الإعدادات السابقة
         loadAllPreferences();
 
         SystemInfo si = new SystemInfo();
@@ -46,6 +44,7 @@ public class App {
         SystemInfoService sysInfoService = new SystemInfoService(si);
         CpuMemoryService cpuMemoryService = new CpuMemoryService(si);
         AppNetworkService appNetworkService = new AppNetworkService(dataSaverService);
+        MacSystemNetworkService macNetService = new MacSystemNetworkService(hal); // 🌟 الخدمة المستقلة الجديدة
 
         SystemTray tray = SystemTray.getSystemTray();
 
@@ -60,8 +59,7 @@ public class App {
             tray.add(cpuWidget);
         }
 
-        // تحديث واجهة القائمة
-        Runnable refreshMenuAction = () -> updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, tray, cpuWidget);
+        Runnable refreshMenuAction = () -> updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, macNetService, tray, cpuWidget);
         refreshMenuAction.run();
 
         Timer timer = new Timer();
@@ -69,6 +67,9 @@ public class App {
             @Override
             public void run() {
                 checkMidnightReset(alertService);
+
+                // تحديث عدادات كرت الماك المستقلة
+                macNetService.update();
 
                 if (isMonitoringActive) {
                     List<NetworkIF> nets = hal.getNetworkIFs();
@@ -103,7 +104,6 @@ public class App {
                     previousRx = curRx;
                     previousTx = curTx;
                 } else {
-                    // وضع الخمول والتعطيل
                     netWidget.setImage(WidgetRenderer.render(
                             currentMode, "0 B", "0 B", todayBytes,
                             alertService.getAlertLimitBytes(),
@@ -113,7 +113,6 @@ public class App {
                     ));
                 }
 
-                // تحديث المعالج والرام إذا كان مفعلاً وظاهراً فقط
                 if (isCpuWidgetVisible && isMonitoringActive) {
                     double cpu = cpuMemoryService.getCpuUsage();
                     long usedMem = cpuMemoryService.getUsedMemory();
@@ -123,29 +122,28 @@ public class App {
                     cpuWidget.setPopupMenu(CpuMenuBuilder.build(cpuMemoryService));
                 }
 
-                // تحديث القائمة دورياً
-                updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, tray, cpuWidget);
+                updateMenu(netWidget, caffeinateService, alertService, sysInfoService, appNetworkService, dataSaverService, macNetService, tray, cpuWidget);
             }
         }, 0, 1000);
     }
 
     private static void updateMenu(TrayIcon netWidget, CaffeinateService caffeinate, AlertService alerts,
                                    SystemInfoService sysInfo, AppNetworkService appNet, DataSaverService dataSaver,
-                                   SystemTray tray, TrayIcon cpuWidget) {
+                                   MacSystemNetworkService macNetService, SystemTray tray, TrayIcon cpuWidget) {
         netWidget.setPopupMenu(MenuBuilder.build(
-                caffeinate, alerts, sysInfo, appNet, dataSaver, currentMode,
+                caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, currentMode,
                 isMonitoringActive, isCpuWidgetVisible, todayBytes, currentRxSpeed, currentTxSpeed,
-                () -> updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget),
+                () -> updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, tray, cpuWidget),
                 () -> {
                     todayBytes = 0;
                     saveTodayData();
                     alerts.resetAlert();
-                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, tray, cpuWidget);
                 },
                 newMonitoringState -> {
                     isMonitoringActive = newMonitoringState;
                     prefs.putBoolean("monitoring_active", isMonitoringActive);
-                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, tray, cpuWidget);
                 },
                 newCpuVisibleState -> {
                     isCpuWidgetVisible = newCpuVisibleState;
@@ -156,12 +154,12 @@ public class App {
                         tray.remove(cpuWidget);
                         notifyUser("تم تعطيل مراقب المعالج", "تم إخفاء وتعطيل مراقب المعالج والرام لتوفير المساحة وموارد الجهاز.");
                     }
-                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, tray, cpuWidget);
                 },
                 newMode -> {
                     currentMode = newMode;
                     prefs.put("display_mode", currentMode.name());
-                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, tray, cpuWidget);
+                    updateMenu(netWidget, caffeinate, alerts, sysInfo, appNet, dataSaver, macNetService, tray, cpuWidget);
                 }
         ));
     }

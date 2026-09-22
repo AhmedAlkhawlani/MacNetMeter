@@ -14,6 +14,7 @@ public class MenuBuilder {
                                   SystemInfoService sysInfo,
                                   AppNetworkService appNetService,
                                   DataSaverService dataSaver,
+                                  MacSystemNetworkService macNetService, // الخدمة الجديدة المستقلة
                                   DisplayMode currentMode,
                                   boolean isMonitoringActive,
                                   boolean isCpuWidgetVisible,
@@ -27,36 +28,49 @@ public class MenuBuilder {
                                   java.util.function.Consumer<DisplayMode> onModeChanged) {
         PopupMenu menu = new PopupMenu();
 
-        // 📌 1. بطاقة معلومات شاملة تظهر كل ما هو مخفي في البار!
-        MenuItem header = new MenuItem("── 📊 Live Status Overview ──");
-        header.setEnabled(false);
-        menu.add(header);
-
-        MenuItem speedInfo = new MenuItem(String.format("⚡ Speeds: ↓ %s | ↑ %s", formatSpeed(rxSpeed), formatSpeed(txSpeed)));
+        // 📌 1. بطاقة معلومات المراقبة والسرعة
+        MenuItem speedInfo = new MenuItem(String.format("⚡ Live Speeds: ↓ %s | ↑ %s", formatSpeed(rxSpeed), formatSpeed(txSpeed)));
         speedInfo.setEnabled(false);
         menu.add(speedInfo);
 
-        MenuItem todayInfo = new MenuItem("📅 Today Usage: " + WidgetRenderer.formatData(todayBytes));
-        todayInfo.setEnabled(false);
-        menu.add(todayInfo);
+        MenuItem sessionInfo = new MenuItem("🎯 Target/Alert Usage: " + WidgetRenderer.formatData(todayBytes));
+        sessionInfo.setEnabled(false);
+        menu.add(sessionInfo);
 
         if (alerts.isAlertActive()) {
             double pct = (double) todayBytes / alerts.getAlertLimitBytes() * 100;
             String limitMsg = (todayBytes >= alerts.getAlertLimitBytes())
                     ? "⚠️ EXCEEDED!"
                     : String.format("%.0f%% of %s", pct, WidgetRenderer.formatData(alerts.getAlertLimitBytes()));
-            MenuItem limitInfo = new MenuItem("🔔 Target Limit: " + limitMsg);
+            MenuItem limitInfo = new MenuItem("🔔 Alert Limit: " + limitMsg);
             limitInfo.setEnabled(false);
             menu.add(limitInfo);
         }
         menu.addSeparator();
 
-        // 2. تفعيل / إيقاف المراقبة مؤقتاً (Pause / Resume)
+        // 🌟 2. اللمسة الختامية: إجمالي استهلاك كرت شبكة الماك بالكامل لليوم (حقيقي ومستقل تماماً)
+        MenuItem macHeader = new MenuItem("── 💻 Mac Total Traffic Today ──");
+        macHeader.setEnabled(false);
+        menu.add(macHeader);
+
+        String macDown = WidgetRenderer.formatData(macNetService.getMacTodayDownload());
+        String macUp = WidgetRenderer.formatData(macNetService.getMacTodayUpload());
+        String macTotal = WidgetRenderer.formatData(macNetService.getMacTodayTotal());
+
+        MenuItem macTotalItem = new MenuItem(String.format("🌐 All Mac Today: %s", macTotal));
+        macTotalItem.setEnabled(false);
+        menu.add(macTotalItem);
+
+        MenuItem macDetails = new MenuItem(String.format("   (↓ In: %s  |  ↑ Out: %s)", macDown, macUp));
+        macDetails.setEnabled(false);
+        menu.add(macDetails);
+        menu.addSeparator();
+
+        // 3. التحكم بالمراقبة والمعالج
         CheckboxMenuItem monitorToggle = new CheckboxMenuItem("🟢 Monitoring Active", isMonitoringActive);
         monitorToggle.addItemListener(e -> onToggleMonitoring.accept(!isMonitoringActive));
         menu.add(monitorToggle);
 
-        // 3. إظهار / إخفاء مراقب المعالج والرام لتوفير المساحة
         CheckboxMenuItem cpuToggle = new CheckboxMenuItem("💻 Show CPU & RAM Monitor", isCpuWidgetVisible);
         cpuToggle.addItemListener(e -> onToggleCpuWidget.accept(!isCpuWidgetVisible));
         menu.add(cpuToggle);
@@ -78,7 +92,7 @@ public class MenuBuilder {
         menu.add(caffeinateItem);
         menu.addSeparator();
 
-        // 5. أوضاع العرض في البار
+        // 5. أوضاع العرض
         Menu viewMenu = new Menu("👁 Display Mode");
         for (DisplayMode mode : DisplayMode.values()) {
             CheckboxMenuItem item = new CheckboxMenuItem(mode.getTitle(), mode == currentMode);
@@ -136,7 +150,7 @@ public class MenuBuilder {
         menu.add(rulesMenu);
         menu.addSeparator();
 
-        // 7. التنبيهات وحد البيانات
+        // 7. التنبيهات
         Menu alertMenu = new Menu("🔔 Data Limit Alert");
         CheckboxMenuItem disableItem = new CheckboxMenuItem("❌ Disabled", !alerts.isAlertActive());
         disableItem.addItemListener(e -> {
@@ -144,7 +158,7 @@ public class MenuBuilder {
             onRefresh.run();
         });
         alertMenu.add(disableItem);
-        long[] presetMB = {10, 500, 1024, 2048, 5120}; // أضفنا 10MB للتجربة السريعة!
+        long[] presetMB = {10, 500, 1024, 2048, 5120};
         String[] titles = {"10 MB (Test)", "500 MB", "1 GB", "2 GB", "5 GB"};
         for (int i = 0; i < presetMB.length; i++) {
             long bytes = presetMB[i] * 1024 * 1024;
@@ -161,8 +175,8 @@ public class MenuBuilder {
         alertMenu.add(customItem);
         menu.add(alertMenu);
 
-        // 8. تصفير العداد والخروج
-        MenuItem resetToday = new MenuItem("🔄 Reset Today's Usage");
+        // 8. تصفير العداد الخاص بالجلسة والتنبيه والخروج
+        MenuItem resetToday = new MenuItem("🔄 Reset Alert & Session Usage");
         resetToday.addActionListener(e -> onResetToday.run());
         menu.add(resetToday);
         menu.addSeparator();
